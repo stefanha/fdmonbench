@@ -15,6 +15,7 @@ Supported APIs:
 - poll(2)
 - epoll(7)
 - io\_uring
+- threads (for comparison with threaded architectures)
 
 Metrics
 -------
@@ -37,7 +38,7 @@ Usage
     Perform file descriptor monitoring benchmarking.
 
       --duration-secs=<int>  run for number of seconds (default: 30)
-      --engine=epoll|io_uring|poll|select
+      --engine=epoll|io_uring|poll|select|threads
                              set fd monitoring engine (default: select)
       --exclusive=0|1        use EPOLLEXCLUSIVE (default: 0)
       --help                 print this help

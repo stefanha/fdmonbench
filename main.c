@@ -29,7 +29,7 @@ static void usage(const char *argv0)
     fprintf(stderr, "Perform file descriptor monitoring benchmarking.\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "  --duration-secs=<int>  run for number of seconds (default: 30)\n");
-    fprintf(stderr, "  --engine=epoll|io_uring|poll|select\n");
+    fprintf(stderr, "  --engine=epoll|io_uring|poll|select|threads\n");
     fprintf(stderr, "                         set fd monitoring engine (default: select)\n");
     fprintf(stderr, "  --exclusive=0|1        use EPOLLEXCLUSIVE (default: 0)\n");
     fprintf(stderr, "  --help                 print this help\n");
@@ -47,6 +47,7 @@ static bool parse_options(struct options *opts, int argc, char **argv)
         &io_uring_engine_ops,
         &poll_engine_ops,
         &select_engine_ops,
+        &threads_engine_ops,
         NULL,
     };
 

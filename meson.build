@@ -10,6 +10,7 @@ executable('fdmonbench',
            'main.c',
            'poll.c',
            'select.c',
+           'threads.c',
            dependencies : [
                dependency('threads'),
                dependency('liburing'),
