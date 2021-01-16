@@ -5,9 +5,13 @@ project('fdmonbench', 'c',
 
 executable('fdmonbench',
            'epoll.c',
+           'io_uring.c',
            'iogen.c',
            'main.c',
            'poll.c',
            'select.c',
-           dependencies : dependency('threads'),
+           dependencies : [
+               dependency('threads'),
+               dependency('liburing'),
+           ],
            install : true)

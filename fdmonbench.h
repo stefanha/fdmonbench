@@ -14,6 +14,7 @@ struct engine_ops;
 extern const struct engine_ops select_engine_ops;
 extern const struct engine_ops poll_engine_ops;
 extern const struct engine_ops epoll_engine_ops;
+extern const struct engine_ops io_uring_engine_ops;
 
 struct options {
     /* Engine type */
