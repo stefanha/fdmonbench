@@ -6,6 +6,7 @@ project('fdmonbench', 'c',
 executable('fdmonbench',
            'iogen.c',
            'main.c',
+           'poll.c',
            'select.c',
            dependencies : dependency('threads'),
            install : true)
