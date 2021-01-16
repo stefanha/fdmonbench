@@ -4,6 +4,7 @@ project('fdmonbench', 'c',
   license : 'GPL-3.0-or-later')
 
 executable('fdmonbench',
+           'epoll.c',
            'iogen.c',
            'main.c',
            'poll.c',
