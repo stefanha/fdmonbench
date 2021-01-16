@@ -12,6 +12,9 @@ file descriptors and one of them becomes ready at a time.
 
 Supported APIs:
 - select(2)
+- poll(2)
+- epoll(7)
+- io\_uring
 
 Metrics
 -------
@@ -34,7 +37,7 @@ Usage
     Perform file descriptor monitoring benchmarking.
 
       --duration-secs=<int>  run for number of seconds (default: 30)
-      --engine=select
+      --engine=epoll|io_uring|poll|select
                              set fd monitoring engine (default: select)
       --exclusive=0|1        use EPOLLEXCLUSIVE (default: 0)
       --help                 print this help
