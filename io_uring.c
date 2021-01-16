@@ -16,30 +16,57 @@ struct io_uring_engine {
     struct io_uring ring;
     int efd; /* the eventfd */
     int poll_mask; /* the events we are monitoring */
+    bool aio_mode; /* are we using aio mode? */
 };
 
-static void io_uring_add_poll_sqe(struct io_uring_engine *pe, int fd)
+/* A version of io_uring_get_sqe() that tries harder */
+static struct io_uring_sqe *io_uring_get_sqe_always(struct io_uring_engine *pe)
 {
     struct io_uring_sqe *sqe;
+    int ret;
+
+    sqe = io_uring_get_sqe(&pe->ring);
+    if (sqe) {
+        return sqe;
+    }
+
+    /* We allocate sufficient resources upfront so this should not fail */
+
+    ret = io_uring_submit(&pe->ring);
+    if (ret < 0) {
+        fprintf(stderr, "io_uring_submit failed with %d\n", ret);
+        return NULL;
+    }
 
     sqe = io_uring_get_sqe(&pe->ring);
     if (!sqe) {
-        int ret;
-
-        /* We allocate sufficient resources upfront so this should not fail */
-
-        ret = io_uring_submit(&pe->ring);
-        if (ret < 0) {
-            fprintf(stderr, "io_uring_submit failed with %d\n", ret);
-            return;
-        }
-
-        sqe = io_uring_get_sqe(&pe->ring);
-        if (!sqe) {
-            fprintf(stderr, "io_uring_get_sqe failed\n");
-            return;
-        }
+        fprintf(stderr, "io_uring_get_sqe failed\n");
+        return NULL;
     }
+
+    return sqe;
+}
+
+/*
+ * Add a read request and a linked write request. The write request has the fd
+ * as its user data.
+ */
+static void io_uring_add_read_write_sqes(struct io_uring_engine *pe, int fd)
+{
+    struct io_uring_sqe *sqe = io_uring_get_sqe_always(pe);
+
+    io_uring_prep_read(sqe, fd, pe->msgbuf, pe->msg_size, -1);
+    io_uring_sqe_set_data(sqe, (void *)~(uintptr_t)0);
+    io_uring_sqe_set_flags(sqe, IOSQE_IO_LINK);
+
+    sqe = io_uring_get_sqe_always(pe);
+    io_uring_prep_write(sqe, fd, pe->msgbuf, pe->msg_size, -1);
+    io_uring_sqe_set_data(sqe, (void *)(uintptr_t)fd);
+}
+
+static void io_uring_add_poll_sqe(struct io_uring_engine *pe, int fd)
+{
+    struct io_uring_sqe *sqe = io_uring_get_sqe_always(pe);
 
     io_uring_prep_poll_add(sqe, fd, pe->poll_mask);
     io_uring_sqe_set_data(sqe, (void *)(uintptr_t)fd);
@@ -73,14 +100,25 @@ static void *io_uring_thread(void *opaque)
                 return NULL;
             }
 
-            if (read(fd, pe->msgbuf, pe->msg_size) <= 0) {
-                goto requeue;
+            /* Poll completed, now read and write back the message */
+            if (!pe->aio_mode) {
+                if (read(fd, pe->msgbuf, pe->msg_size) <= 0) {
+                    goto requeue;
+                }
+                write(fd, pe->msgbuf, pe->msg_size);
             }
-            write(fd, pe->msgbuf, pe->msg_size);
 
 requeue:    /* Submit another IORING_OP_POLL_ADD since it's a oneshot */
             io_uring_cq_advance(&pe->ring, 1);
-            io_uring_add_poll_sqe(pe, fd);
+
+            if (fd != pe->efd && pe->aio_mode) {
+                /* Read requests have user_data=-1, ignore them */
+                if (fd != -1) {
+                    io_uring_add_read_write_sqes(pe, fd);
+                }
+            } else {
+                io_uring_add_poll_sqe(pe, fd);
+            }
         }
     }
 
@@ -93,6 +131,7 @@ static struct engine *io_uring_create(const struct options *opts,
 {
     const char *err = NULL;
     struct io_uring_engine *pe;
+    unsigned entries;
     int ret;
 
     pe = malloc(sizeof(*pe));
@@ -101,7 +140,8 @@ static struct engine *io_uring_create(const struct options *opts,
         return NULL;
     }
 
-    pe->engine.ops = &io_uring_engine_ops;
+    pe->engine.ops = opts->engine_ops;
+    pe->aio_mode = opts->engine_ops == &io_uring_aio_engine_ops;
 
     pe->poll_mask = POLLIN;
     if (opts->exclusive) {
@@ -115,14 +155,25 @@ static struct engine *io_uring_create(const struct options *opts,
         goto err_free_se;
     }
 
-    ret = io_uring_queue_init(64, &pe->ring, 0);
+    /* When polling we don't need to reserve many entries */
+    if (pe->aio_mode) {
+        entries = opts->num_fds * 2 + 1;
+    } else {
+        entries = 64;
+    }
+
+    ret = io_uring_queue_init(entries, &pe->ring, 0);
     if (ret < 0) {
         err = "io_uring_queue_init failed (do you need to increase ulimit -l?)";
         goto err_free_msgbuf;
     }
 
     for (int i = 0; i < opts->num_fds; i++) {
-        io_uring_add_poll_sqe(pe, fds[i]);
+        if (pe->aio_mode) {
+            io_uring_add_read_write_sqes(pe, fds[i]);
+        } else {
+            io_uring_add_poll_sqe(pe, fds[i]);
+        }
     }
 
     /* The eventfd is used to tell the thread to stop */
@@ -198,4 +249,10 @@ const struct engine_ops io_uring_engine_ops = {
     .create = io_uring_create,
     .destroy = io_uring_destroy,
     .supports_exclusive = true,
+};
+
+const struct engine_ops io_uring_aio_engine_ops = {
+    .name = "io_uring-aio",
+    .create = io_uring_create,
+    .destroy = io_uring_destroy,
 };
