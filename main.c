@@ -159,6 +159,12 @@ static bool parse_options(struct options *opts, int argc, char **argv)
         return false;
     }
 
+    if (opts->exclusive && !opts->engine_ops->supports_exclusive) {
+        fprintf(stderr, "%s engine does not support exclusive=1\n",
+                opts->engine_ops->name);
+        return NULL;
+    }
+
     return true;
 }
 

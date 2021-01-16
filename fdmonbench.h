@@ -49,6 +49,9 @@ struct engine_ops {
 
     /* Destroy an engine instance and release its resources */
     void (*destroy)(struct engine *e);
+
+    /* Is EPOLLEXCLUSIVE supported? */
+    bool supports_exclusive;
 };
 
 /* I/O generator */

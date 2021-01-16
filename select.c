@@ -80,11 +80,6 @@ static struct engine *select_create(const struct options *opts,
     struct select_engine *se;
     int ret;
 
-    if (opts->exclusive) {
-        *errmsg = strdup("select engine does not support exclusive=1");
-        return NULL;
-    }
-
     for (int i = 0; i < opts->num_fds; i++) {
         if (fds[i] >= FD_SETSIZE) {
             *errmsg = strdup("Maximum number of fds exceeded for select engine");
