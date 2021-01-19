@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <fcntl.h>
 #include <poll.h>
 #include <liburing.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
+#include <unistd.h>
 #include "fdmonbench.h"
 
 struct io_uring_engine {
@@ -47,20 +49,19 @@ static struct io_uring_sqe *io_uring_get_sqe_always(struct io_uring_engine *pe)
     return sqe;
 }
 
-/*
- * Add a read request and a linked write request. The write request has the fd
- * as its user data.
- */
-static void io_uring_add_read_write_sqes(struct io_uring_engine *pe, int fd)
+static void io_uring_add_read_sqe(struct io_uring_engine *pe, int fd)
 {
     struct io_uring_sqe *sqe = io_uring_get_sqe_always(pe);
 
-    io_uring_prep_read(sqe, fd, pe->msgbuf, pe->msg_size, -1);
-    io_uring_sqe_set_data(sqe, (void *)~(uintptr_t)0);
-    io_uring_sqe_set_flags(sqe, IOSQE_IO_LINK);
+    io_uring_prep_read(sqe, fd, pe->msgbuf, pe->msg_size, 0);
+    io_uring_sqe_set_data(sqe, (void *)(0x8000000000000000ull | (uintptr_t)fd));
+}
 
-    sqe = io_uring_get_sqe_always(pe);
-    io_uring_prep_write(sqe, fd, pe->msgbuf, pe->msg_size, -1);
+static void io_uring_add_write_sqe(struct io_uring_engine *pe, int fd)
+{
+    struct io_uring_sqe *sqe = io_uring_get_sqe_always(pe);
+
+    io_uring_prep_write(sqe, fd, pe->msgbuf, pe->msg_size, 0);
     io_uring_sqe_set_data(sqe, (void *)(uintptr_t)fd);
 }
 
@@ -87,6 +88,7 @@ static void *io_uring_thread(void *opaque)
 
         io_uring_for_each_cqe(&pe->ring, head, cqe) {
             int fd = cqe->user_data;
+            bool is_aio_read = !!(0x8000000000000000ull & cqe->user_data);
 
             /* Handle our eventfd */
             if (fd == pe->efd) {
@@ -112,9 +114,10 @@ requeue:    /* Submit another IORING_OP_POLL_ADD since it's a oneshot */
             io_uring_cq_advance(&pe->ring, 1);
 
             if (fd != pe->efd && pe->aio_mode) {
-                /* Read requests have user_data=-1, ignore them */
-                if (fd != -1) {
-                    io_uring_add_read_write_sqes(pe, fd);
+                if (is_aio_read) {
+                    io_uring_add_write_sqe(pe, fd);
+                } else {
+                    io_uring_add_read_sqe(pe, fd);
                 }
             } else {
                 io_uring_add_poll_sqe(pe, fd);
@@ -170,7 +173,9 @@ static struct engine *io_uring_create(const struct options *opts,
 
     for (int i = 0; i < opts->num_fds; i++) {
         if (pe->aio_mode) {
-            io_uring_add_read_write_sqes(pe, fds[i]);
+            fcntl(fds[i], F_SETFL,
+                  fcntl(fds[i], F_GETFL, 0) & ~O_NONBLOCK);
+            io_uring_add_read_sqe(pe, fds[i]);
         } else {
             io_uring_add_poll_sqe(pe, fds[i]);
         }
